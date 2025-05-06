@@ -3,6 +3,3 @@
 .env.test
 /node_modules
 test.js
-/old
-
-img/

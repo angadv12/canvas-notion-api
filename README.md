@@ -1,54 +1,29 @@
-# Canvas to Notion Integration
-View your Canvas assignments in Notion created by Mari Garey!
-
-<img src="./img/canvasNotionIntegration.png" width="500"/>
+# Canvas to Notion API
+Fetch Canvas Assignments into Notion
 
 ## Introduction
 
-Using this repository you will be able to export all of your assignments from Canvas to a Notion Database!
-Following the instructions below will help you set up the database!
+This tool fetches assignments from your current Canvas courses and\
+populates a specified Notion page with the tables for each course.
 
-### Support the Creator!
-
-* Give a ⭐️ to the repository <sub>please and thank you 🤗</sub>
-* Submit a PR for feedback or in the Discussion Tab
-* Watch the demo on YT and give it a 👍 
-
-
-## Using the Canvas to Notion Integration
-
-### Video Tutorial
-
-*Coming Soon*
+## Setup Guide
 
 ### 1. Project Setup
 
+#### Clone repo
 ```zsh
-# Clone this repository to your computer
-git clone https://github.com/marigarey/canvas-notion-integration.git
-
-# Open this project
-cd canvas-notion-integration
+git clone https://github.com/angadv12/canvas-notion-api.git
 ```
 
-#### Without Docker
+#### Navigate to the repo
 ```zsh
-# Install dependencies
-npm install
+cd canvas-notion-api
 ```
 
-#### With Docker
+#### Install required dependencies
 ```zsh
-# Build image
-docker -t canvas-notion-integration build .
+npm i
 ```
-
-> [!NOTE]
-> This step is not required on most architectures. GHCR should have built the latest version on the following architectures:
-> - `linux/amd64`
-> - `linux/arm/v6`
-> - `linux/arm/v7`
-> - `linux/arm64`
 
 ### 2. Canvas Token Access
 
@@ -63,10 +38,6 @@ Go to your Canvas Profile Settings and scroll down to `Approved Integrations`.
     Once the Token is generated, copy the Token string.
 
 This string will be your **Canvas API Key**
-
-> [!WARNING]
-> Once you move away from that screen you will not be able to access the token string!
-> Make sure to save the Token string now!
 
 ### 3. Notion API Key Access[^1]
 
@@ -87,11 +58,6 @@ Scroll down to `+ Add Connections`. Find and select the integration. Make sure t
 ### 5. Environment Variable `.env` file Setup
 Create a `.env` file and replace all the <> with your own information. Place the `.env` file in the `src` folder.
 *Keep the `NOTION_DATABASE` variable as is because it will be overwritten when you run the code*
-> [!NOTE]
-> How to Access the Key for the `NOTION_PAGE`:
-> 1. On the desired Notion page, click `Share` then `🔗 Copy link`
-> 2. Paste the link down, example url: notion.so/{name}/{page}-**0123456789abcdefghijklmnopqrstuv**?{otherstuff}
-> 3. Copy the string of 32 letter and number combination to the `.env` file
 
 ```
 CANVAS_API_URL=<example: https://canvas-page.edu>
@@ -101,40 +67,19 @@ NOTION_API=<your notion api key> # filled by user
 NOTION_DATABASE='invalid' # filled by integration
 ```
 
+> [!NOTE]
+> How to Access the Key for the `NOTION_PAGE`:
+> 1. On the desired Notion page, click `Share` then `🔗 Copy link`
+> 2. Paste the link down, example url: notion.so/{name}/{page}-**0123456789abcdefghijklmnopqrstuv**?{otherstuff}
+> 3. Copy the string of 32 letter and number combination to the `.env` file
+
 ### 6. Run Code
 
-> [!IMPORTANT]
-> To update your database you will have to run the script every time there is a change in Canvas
-> It is recomended to rerun the code every semester or class/assignment changes
-
-#### Without Docker
 ```zsh
 cd src
 node main.js
 ```
 
-#### With Docker
-```zsh
-docker run --env-file ./.env canvas-notion-integration
-```
-
 > [!NOTE]
-> If you did not choose to build the image yourself, you can replace `canvas-notion-integration` with `ghcr.io/marigarey/canvas-notion-integration:main`
-
-## Other Information
-
-In the future I do plan to add more to this, possibly blocks outside of the database.
-If you have any suggestions on what I should, please let me know! I want to hear your feedback and improve!
-
-> [!NOTE]
-> The ID Property is for internal use and you can hide it in your database
-> Hiding a Property:
-> 1. Go to `...` on the top right of your database
-> 2. Click on the `Properties` Tab
-> 3. Click the eye on the `ID` Property
-> 4. It should get crossed out and disapear from your database!
-
-<sub>Other: Docker addition doesn't run because the .env file is not set up</sub>
-
-[^1]: [Source of Gifs and for more information on Notion Integrations](https://developers.notion.com/docs/create-a-notion-integration)
+> To see updates in your Notion tables, you need to rerun the script, which checks for new assignments for each course.
 
