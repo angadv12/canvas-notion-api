@@ -83,3 +83,10 @@ node main.js
 > [!NOTE]
 > To see updates in your Notion tables, you need to rerun the script, which checks for new assignments for each course.
 
+## Other Information
+
+#### Built from: https://github.com/marigarey/canvas-notion-integration
+
+#### Key modifications
+1. Bug fixes so assignments are actually fetched
+2. Create separate Notion tables for each course
