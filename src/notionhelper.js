@@ -1,241 +1,116 @@
 require('dotenv').config()
+const { Client } = require('@notionhq/client')
+const notionClient = new Client({ auth: process.env.NOTION_API })
+const { setEnvValue } = require('./util')
 
-const { Client } = require("@notionhq/client")
-const Notion = new Client({ auth: process.env.NOTION_API})
-const { setEnvValue } = require("./util")
-
-/**
- * Class to help create/update the database in Notion,
- * as well as the pages in Notion database
- * @author Mari Garey
- */
 class NotionHelper {
+  constructor() {
+    this.page = process.env.NOTION_PAGE
+    this.databases = {}
+  }
 
-    api // notion api key
-    page // notion parent page id
-    database // notion database id
+  /**
+   * Finds or creates a Notion database for a given course.
+   * First checks env var, then searches child blocks, then creates.
+   */
+  async ensureDatabase(course) {
+    const envKey = `NOTION_DB_${course.id}`
+    if (this.databases[course.id]) return this.databases[course.id]
 
-    constructor() {
-        this.api = process.env.NOTION_API
-        this.page = process.env.NOTION_PAGE
-        this.database = process.env.NOTION_DATABASE
+    // 1. Check environment for existing DB ID
+    const existingEnv = process.env[envKey]
+    if (existingEnv) {
+      this.databases[course.id] = existingEnv
+      return existingEnv
     }
 
-    /**
-     * Sets the local and the .env file
-     */
-    set database(database) {
-        this.database = database
-    }
-
-    get database() {
-        return this.database
-    }
-
-    get pages() {
-        return this.getNotionPages()
-    }
-
-    set pageId(pageId) {
-        this.pageId = pageId
-    }
-
-    get pageId() {
-        return this.pageId
-    }
-
-    set token(token) {
-        this.token = token
-    }
-
-    get token() {
-        return this.token
-    }
-
-    /**
-     * IMPORTANT: only will get 100 pages max
-     * 
-     * Accesses all the current pages in a Notion Database
-     * @returns array of notion pages
-     */
-    async getNotionPages() {
-        try {
-            const response = await Notion.databases.query({
-                database_id: this.database,
-            })
-            const notion_pages = response.results.map(
-                (page) => page.properties.ID.number
-            )
-    
-            return notion_pages
-        } catch(error) {
-            console.log(`ERROR: getNotionPages() did not run: ${error}`)
+    // 2. Search for a matching child database by title via metadata
+    const sanitizedTitle = `${course.name.replace(/,/g, ' -')} Assignments`
+    let cursor = undefined
+    let foundDbId = null
+    do {
+      const resp = await notionClient.blocks.children.list({
+        block_id: this.page,
+        start_cursor: cursor
+      })
+      cursor = resp.has_more ? resp.next_cursor : undefined
+      for (const block of resp.results) {
+        if (block.type === 'child_database') {
+          const dbId = block.id || block.child_database?.id
+          try {
+            const meta = await notionClient.databases.retrieve({ database_id: dbId })
+            const titleText = meta.title.map(t => t.plain_text).join('')
+            if (titleText === sanitizedTitle) {
+              foundDbId = dbId
+              break
+            }
+          } catch (e) {
+            // ignore retrieval errors
+          }
         }
+      }
+    } while (cursor && !foundDbId)
+
+    if (foundDbId) {
+      this.databases[course.id] = foundDbId
+      setEnvValue(envKey, foundDbId)
+      return foundDbId
     }
 
-    /**
-     * Accesses all the current pages for the 
-     * course property in the Notion Database
-     * @param {Promise<id: string, name: string>} course 
-     * @returns 
-     */
-    async getNotionPagesByCourse(course) {
-        try {
-            const response = await Notion.databases.query({
-                database_id: this.database,
-                filter: {
-                    property: "Course",
-                    select: {
-                        equals: course.name
-                    }
-                }
-            })
-    
-            const notion_pages = response.results.map(
-                (page) => page.properties.ID.number
-            )
-            return notion_pages
-        } catch(error) {
-            console.log(`ERROR: getNotionPagesByCourse() did not run: ${error}`)
-        }
-    }
+    // 3. Create a new database if none found
+    const db = await notionClient.databases.create({
+      parent: { type: 'page_id', page_id: this.page },
+      title: [{ type: 'text', text: { content: sanitizedTitle } }],
+      properties: {
+        'Assignment Name': { type: 'title', title: {} },
+        'Due Date': { type: 'date', date: {} },
+        URL: { type: 'url', url: {} },
+        Completion: { type: 'checkbox', checkbox: {} }
+      }
+    })
 
-    /**
-     * Creates a new database in the Notion page
-     * @param {Array<id: string, name: string>} courses
-     */
-    async createNotionDatabase(courses) {
-        try {
-            const newDatabase = await Notion.databases.create({
-                parent: {
-                    type: "page_id",
-                    page_id: this.page,
-                },
-                title: [
-                    {
-                        type: "text",
-                        text: {
-                            content: "Canvas Assignments",
-                        },
-                    },
-                ],
-                properties: {
-                    "Assignment Name": {
-                        type: "title",
-                        title: {},
-                    },
-                    "Due Date": {
-                        type: "date",
-                        date: {},
-                    },
-                    "Course": {
-                        select: {
-                            options: await courses,
-                        },
-                    },
-                    "Completion": {
-                        type: "checkbox",
-                        checkbox: {}
-                    },
-                    "URL": {
-                        type: "url",
-                        url: {},
-                    },
-                    "ID": {
-                        type: "number",
-                        number: {
-                            format: "number"
-                        },
-                    },
-                }
-            })
-            console.log(`SUCCESS: Database has been created!`)
-            this.database = newDatabase.id
-            setEnvValue('NOTION_DATABASE', `'${this.database}'`)
-        } catch (error) {
-            console.log(`DATABASE ERROR: ${error}`)
-        }
-    }
+    this.databases[course.id] = db.id
+    setEnvValue(envKey, db.id)
+    return db.id
+  }
 
-    /**
-     * Updates the Course Property in the Notion Database
-     * @param {Array<id: string, name: string>} updatedCourses 
-     */
-    async updateNotionDatabase(updatedCourses) {
-        try {
-            const response = await Notion.databases.update({
-                database_id: this.database,
-                properties: {
-                    "Course": {
-                        select: {
-                            options: await updatedCourses,
-                        },
-                    },
-                },
-            })
-            console.log(`SUCCESS: Database has been updated!`)
-        } catch (error) {
-            console.log(`ERROR: Database could not be update! ${error}`)
-        }
-    }
+  async getExistingURLs(dbId) {
+    const urls = []
+    let cursor
+    do {
+      const resp = await notionClient.databases.query({
+        database_id: dbId,
+        start_cursor: cursor
+      })
+      cursor = resp.has_more ? resp.next_cursor : null
+      resp.results.forEach(page => {
+        const url = page.properties.URL.url
+        if (url) urls.push(url)
+      })
+    } while (cursor)
+    return urls
+  }
 
-    /**
-     * Creates a page in the Notion database with properties from page_properties
-     * @param {Promise<Array<{name: string, data: string, course: string, url: string, ID: string}>>} page_properties 
-     */
-    async createNotionPage(page_properties) {
-        try {
-            const newPage = await Notion.pages.create({
-                parent: {
-                    type: "database_id",
-                    database_id: this.database
-                },
-                properties: await page_properties,
-            })
-            console.log(`SUCCESS: new page ${page_properties.ID.number} has been created!`)
-        } catch (error) {
-            console.log(`ERROR: createNotionPage failed!\n${error}`)
-        }
+  /** Creates or updates a page based on URL uniqueness */
+  async createOrUpdatePage(dbId, props) {
+    if (props['Due Date'] && (!props['Due Date'].date || props['Due Date'].date.start === undefined)) {
+      delete props['Due Date']
     }
-
-    /**
-     * Updates a page in the notion database with properties from page_properties
-     * @param {Promise<Array<{name: string, data: string, course: string, url: string, ID: string}>>} page_properties 
-     */
-    async updateNotionPage(page_properties) {
-        try {
-            // update properties
-            const updatePage = await Notion.pages.update({
-                page_id: await this.getNotionPageID(page_properties),
-                properties: page_properties,
-            })
-            console.log(`SUCCESS: new page ${page_properties.ID.number} has been updated!`)
-        } catch (error) {
-            console.log(`ERROR: Could not update page ${page_properties.ID.number}`)
-        }
+    const existing = await this.getExistingURLs(dbId)
+    if (existing.includes(props.URL.url)) {
+      const resp = await notionClient.databases.query({
+        database_id: dbId,
+        filter: { property: 'URL', url: { equals: props.URL.url } }
+      })
+      const pageId = resp.results[0].id
+      await notionClient.pages.update({ page_id: pageId, properties: props })
+    } else {
+      await notionClient.pages.create({
+        parent: { type: 'database_id', database_id: dbId },
+        properties: props
+      })
     }
-
-    /**
-     * Returns the page id of the page associated with the page_properties
-     * @param {Promise<Array<{name: string, data: string, course: string, url: string, ID: string}>>} page_properties 
-     * @returns page id
-     */
-    async getNotionPageID(page_properties) {
-        try {
-            const response = Notion.databases.query({
-                database_id: this.database,
-                filter: {
-                    property: "ID",
-                    number: {
-                        equals: page_properties.ID.number
-                    }
-                }
-            })
-            return (await response).results[0].id
-        } catch (error) {
-            console.log(`ERROR: Could not locate page!!`)
-        }
-    }
+  }
 }
 
-module.exports = { NotionHelper}
+module.exports = { NotionHelper }
