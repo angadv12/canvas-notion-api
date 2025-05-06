@@ -39,7 +39,7 @@ Go to your Canvas Profile Settings and scroll down to `Approved Integrations`.
 
 This string will be your **Canvas API Key**
 
-### 3. Notion API Key Access[^1]
+### 3. Notion API Key Access
 
 Pull up the [Notion - My Integrations](https://www.notion.so/my-integrations) site and click `+ New Integration`
 
