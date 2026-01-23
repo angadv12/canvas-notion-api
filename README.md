@@ -64,7 +64,7 @@ CANVAS_API_URL=<example: https://canvas-page.edu>
 CANVAS_API=<your canvas api token>
 NOTION_PAGE=<page id of the parent page to create the database>
 NOTION_API=<your notion api key> # filled by user
-NOTION_DATABASE='invalid' # filled by integration
+NOTION_DB='invalid' # filled by integration
 ```
 
 > [!NOTE]
