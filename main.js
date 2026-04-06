@@ -1,4 +1,4 @@
-const { runCli } = require('./cli')
+const { runCli } = require('./src/cli')
 
 const args = process.argv.slice(2)
 runCli(args.length ? args : ['sync']).catch((error) => {

@@ -1,16 +1,44 @@
 {
+  "name": "canvas-notion-api",
+  "version": "0.1.0",
+  "description": "Sync Canvas assignments and discussions into a Notion database.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/angadv12/canvas-notion-api.git"
+  },
+  "homepage": "https://github.com/angadv12/canvas-notion-api",
+  "bugs": {
+    "url": "https://github.com/angadv12/canvas-notion-api/issues"
+  },
+  "bin": {
+    "canvas-notion": "./bin/canvas-notion.js"
+  },
+  "files": [
+    "bin",
+    "docs",
+    "main.js",
+    "README.md",
+    "src"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "setup:interactive": "node ./bin/canvas-notion.js setup",
+    "sync": "node ./bin/canvas-notion.js sync",
+    "doctor": "node ./bin/canvas-notion.js doctor",
+    "test": "node --test"
+  },
+  "keywords": [
+    "canvas",
+    "notion",
+    "cli",
+    "productivity",
+    "automation"
+  ],
   "dependencies": {
-    "@notionhq/client": "^2.2.17",
+    "@notionhq/client": "^5.16.0",
     "dotenv": "^16.4.7"
-  },
-  "name": "nodemon",
-  "homepage": "http://nodemon.io",
-  "...": "... other standard package.json values",
-  "nodemonConfig": {
-    "ignore": [
-      "**/img/**"
-    ],
-    "delay": 2500
-  },
-  "license": "MIT"
+  }
 }

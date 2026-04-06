@@ -3,3 +3,5 @@
 .env.test
 /node_modules
 test.js
+.canvas-notion/
+cron.log
