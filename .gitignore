@@ -1,5 +1,10 @@
 # dotenv environment variables files
-.env
+*.env
 .env.test
+.DS_Store
 /node_modules
 test.js
+.canvas-notion/
+cron.log
+.claude/
+*.tgz
