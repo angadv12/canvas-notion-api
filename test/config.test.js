@@ -51,6 +51,7 @@ test('parseArgv handles commands, booleans, and value flags', () => {
   const parsed = parseArgv([
     'sync',
     '--dry-run',
+    '--reconcile',
     '--scope',
     'all-active',
     '--course=db',
@@ -59,6 +60,7 @@ test('parseArgv handles commands, booleans, and value flags', () => {
 
   assert.equal(parsed.command, 'sync')
   assert.equal(parsed.flags.dryRun, true)
+  assert.equal(parsed.flags.reconcile, true)
   assert.equal(parsed.flags.scope, 'all-active')
   assert.equal(parsed.flags.course, 'db')
   assert.equal(parsed.flags.includeDiscussions, 'false')

@@ -18,6 +18,19 @@ function createTestConfig() {
   }
 }
 
+function completePropertySchema() {
+  const properties = Object.fromEntries(
+    Object.entries(REQUIRED_DATABASE_PROPERTIES).map(([name, type]) => [name, { type }])
+  )
+  properties['Item Type'] = {
+    type: 'select',
+    select: {
+      options: [{ name: 'assignment' }, { name: 'discussion' }]
+    }
+  }
+  return properties
+}
+
 test('NotionProvider uses data sources for reads and data_source_id for page creation', async () => {
   const calls = {
     databaseRetrieve: 0,
@@ -45,9 +58,7 @@ test('NotionProvider uses data sources for reads and data_source_id for page cre
       async retrieve() {
         return {
           id: 'ds-1',
-          properties: Object.fromEntries(
-            Object.entries(REQUIRED_DATABASE_PROPERTIES).map(([name, type]) => [name, { type }])
-          )
+          properties: completePropertySchema()
         }
       },
       async query(args) {
@@ -57,6 +68,9 @@ test('NotionProvider uses data sources for reads and data_source_id for page cre
           next_cursor: null,
           results: []
         }
+      },
+      async update() {
+        throw new Error('schema update should not be needed for complete schemas')
       }
     },
     pages: {
@@ -119,4 +133,134 @@ test('NotionProvider uses data sources for reads and data_source_id for page cre
   assert.equal(calls.pageCreate[0].parent.data_source_id, 'ds-1')
   assert.equal(calls.pageUpdate[0].in_trash, true)
   assert.equal(calls.pageUpdate[1].in_trash, false)
+})
+
+test('NotionProvider enriches an existing schema with missing sync metadata properties', async () => {
+  const calls = {
+    dataSourceUpdate: []
+  }
+
+  const partialProperties = completePropertySchema()
+  delete partialProperties['Course ID']
+  delete partialProperties['Canvas ID']
+  delete partialProperties['Item Type']
+  delete partialProperties['Source Key']
+  delete partialProperties['Source Signature']
+
+  const fakeClient = {
+    users: {
+      async me() {
+        return { object: 'user' }
+      }
+    },
+    databases: {
+      async retrieve() {
+        return {
+          id: 'db-1',
+          data_sources: [{ id: 'ds-1', name: 'Primary' }]
+        }
+      }
+    },
+    dataSources: {
+      async retrieve() {
+        return {
+          id: 'ds-1',
+          properties: partialProperties
+        }
+      },
+      async update(args) {
+        calls.dataSourceUpdate.push(args)
+        return {
+          id: 'ds-1',
+          properties: {
+            ...partialProperties,
+            ...args.properties
+          }
+        }
+      }
+    },
+    pages: {
+      async create() {
+        throw new Error('not needed')
+      },
+      async update() {
+        throw new Error('not needed')
+      }
+    }
+  }
+
+  const provider = new NotionProvider(createTestConfig(), { client: fakeClient })
+  await provider.ensureDatabase({ databaseId: 'db-1' })
+
+  assert.equal(calls.dataSourceUpdate.length, 1)
+  assert.deepEqual(Object.keys(calls.dataSourceUpdate[0].properties).sort(), [
+    'Canvas ID',
+    'Course ID',
+    'Item Type',
+    'Source Key',
+    'Source Signature'
+  ])
+})
+
+test('NotionProvider update payload refreshes Canvas fields without touching Completion', async () => {
+  const calls = {
+    pageUpdate: []
+  }
+
+  const fakeClient = {
+    users: {
+      async me() {
+        return { object: 'user' }
+      }
+    },
+    databases: {
+      async retrieve() {
+        return {
+          id: 'db-1',
+          data_sources: [{ id: 'ds-1', name: 'Primary' }]
+        }
+      }
+    },
+    dataSources: {
+      async retrieve() {
+        return {
+          id: 'ds-1',
+          properties: completePropertySchema()
+        }
+      }
+    },
+    pages: {
+      async create() {
+        throw new Error('not needed')
+      },
+      async update(args) {
+        calls.pageUpdate.push(args)
+        return {
+          id: args.page_id,
+          in_trash: false,
+          properties: args.properties || {}
+        }
+      }
+    }
+  }
+
+  const provider = new NotionProvider(createTestConfig(), { client: fakeClient })
+  await provider.updatePage('page-1', {
+    title: 'Homework 2',
+    courseName: 'Databases',
+    courseId: 'course-1',
+    canvasId: 'item-1',
+    itemType: 'assignment',
+    url: 'https://canvas/item-1',
+    dueStart: '2026-04-20T23:59:00.000Z',
+    dueEnd: null,
+    canvasUpdatedAt: '2026-04-13T12:00:00.000Z',
+    sourceKey: 'course-1:assignment:item-1',
+    sourceSignature: 'sig-2'
+  })
+
+  const properties = calls.pageUpdate[0].properties
+  assert.equal(properties['Assignment Name'].title[0].text.content, 'Homework 2')
+  assert.equal(properties['Due Date'].date.start, '2026-04-20T23:59:00.000Z')
+  assert.equal('Completion' in properties, false)
 })

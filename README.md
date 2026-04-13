@@ -22,14 +22,22 @@ node ./bin/canvas-notion.js setup
 node ./bin/canvas-notion.js sync
 ```
 
-### npm-style usage
+### Global install
 
 ```bash
-npx canvas-notion setup
-npx canvas-notion sync
+npm install -g canvas-notion-api
+canvas-notion setup
+canvas-notion sync
 ```
 
-The package name may still change before publishing, but the CLI command is `canvas-notion`.
+### One-off usage without a global install
+
+```bash
+npx -p canvas-notion-api canvas-notion setup
+npx -p canvas-notion-api canvas-notion sync
+```
+
+The npm package is `canvas-notion-api` and the CLI command is `canvas-notion`.
 
 ## Commands
 
@@ -48,6 +56,8 @@ canvas-notion setup --canvas-url https://canvas.example.edu --canvas-token <toke
 - attaches to an existing v2-compatible database with `--database-url`, or
 - creates a fresh `Canvas Assignments` database under `--parent-url`.
 
+If you already have the unified Notion database, pass its URL or ID and setup will attach to it instead of prompting you to create a new database.
+
 ### `sync`
 
 Run the sync engine.
@@ -55,6 +65,7 @@ Run the sync engine.
 ```bash
 canvas-notion sync
 canvas-notion sync --dry-run
+canvas-notion sync --reconcile
 canvas-notion sync --scope all-active
 canvas-notion sync --course "Database Systems"
 canvas-notion sync --course 12345,67890
@@ -67,6 +78,9 @@ Behavior:
 - restores previously archived rows if the same Canvas item returns
 - archives rows missing from Canvas for the courses included in the current sync scope
 - leaves the `Completion` checkbox untouched
+- uses a local state cache so steady-state runs can skip a full Notion scan
+
+Use `--reconcile` to rebuild the local cache from Notion if you have manually edited or moved sync-managed rows, or if you want to force a full verification pass.
 
 ### `doctor`
 
@@ -148,8 +162,9 @@ The CLI-created database uses these properties:
 
 - `sync --dry-run` is the safest first run because it prints planned creates, updates, restores, and archives.
 - `doctor` is the fastest way to catch invalid tokens or a broken database schema.
+- `sync --reconcile` refreshes the local state cache from Notion and is the safest repair command after manual Notion changes.
 - Runtime is logged by phase so it is easier to tell whether Canvas fetches or Notion writes are the bottleneck.
-- Notion writes now run through the post-`2025-09-03` data source APIs with rate-limited concurrency instead of fully serial page creation.
+- Notion writes run through the post-`2025-09-03` data source APIs with rate-limited concurrency instead of a fully serial loop.
 
 ## Specs
 

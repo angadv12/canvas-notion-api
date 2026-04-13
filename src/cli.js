@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 const { loadConfig } = require('./config')
-const { loadState, saveState } = require('./state')
+const { createStateFromPages, createTrackedItem, loadState, saveState } = require('./state')
 const { CanvasProvider } = require('./canvas')
 const { NotionProvider } = require('./notion')
 const { runSync } = require('./sync')
 const { runSetup } = require('./setup')
 const { runDoctor } = require('./doctor')
 const { DEFAULT_CONFIG } = require('./constants')
+const { toBoolean } = require('./utils')
 
 async function runCli(argv = process.argv.slice(2), context = {}) {
   const cwd = context.cwd || process.cwd()
@@ -40,14 +41,24 @@ async function runCli(argv = process.argv.slice(2), context = {}) {
   }
 
   if (command === 'sync') {
+    const normalizedConfig = normalizeSyncConfig(config)
     const state = loadState({ cwd, scope })
     const stateStore = {
       state,
-      trackPage(sourceKey, pageId, archived) {
-        state.items[sourceKey] = {
+      trackPage(sourceKey, pageId, archived, item = {}) {
+        state.items[sourceKey] = createTrackedItem({
+          sourceKey,
           pageId,
-          archived
-        }
+          archived,
+          courseId: item.courseId,
+          sourceSignature: item.sourceSignature
+        })
+      },
+      replacePages(databaseId, pages) {
+        const nextState = createStateFromPages(databaseId, pages)
+        state.version = nextState.version
+        state.databaseId = nextState.databaseId
+        state.items = nextState.items
       },
       save() {
         saveState({ cwd, scope, state })
@@ -55,16 +66,19 @@ async function runCli(argv = process.argv.slice(2), context = {}) {
     }
 
     await runSync({
-      config: normalizeSyncConfig(config),
-      canvasProvider: new CanvasProvider(config),
-      notionProvider: new NotionProvider(config),
+      config: normalizedConfig,
+      canvasProvider: new CanvasProvider(normalizedConfig),
+      notionProvider: new NotionProvider(normalizedConfig),
       stateStore,
       logger: context.logger || console,
       options: {
-        dryRun: Boolean(flags.dryRun),
+        dryRun: toBoolean(flags.dryRun, false),
+        reconcile: toBoolean(flags.reconcile, false),
         scope: flags.scope,
         courseFilter: arrayify(flags.course),
-        includeDiscussions: flags.includeDiscussions
+        includeDiscussions: flags.includeDiscussions === undefined
+          ? undefined
+          : toBoolean(flags.includeDiscussions, true)
       }
     })
     return
@@ -136,7 +150,7 @@ function printHelp() {
 
 Usage:
   canvas-notion setup [--global]
-  canvas-notion sync [--dry-run] [--scope latest-term|all-active] [--course <name-or-id>]
+  canvas-notion sync [--dry-run] [--reconcile] [--scope latest-term|all-active] [--course <name-or-id>]
   canvas-notion doctor
 
 Key flags:
@@ -146,6 +160,7 @@ Key flags:
   --parent-url <url>
   --database-url <url>
   --database-title <title>
+  --reconcile
   --include-discussions <true|false>
   --notion-write-concurrency <number>
   --request-timeout-ms <number>

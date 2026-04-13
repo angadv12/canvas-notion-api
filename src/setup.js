@@ -6,7 +6,15 @@ const { NotionProvider } = require('./notion')
 const { CanvasProvider } = require('./canvas')
 const { extractNotionId, toBoolean } = require('./utils')
 
-async function runSetup({ cwd, config, scope, flags = {}, logger = console }) {
+async function runSetup({
+  cwd,
+  config,
+  scope,
+  flags = {},
+  logger = console,
+  canvasProvider,
+  notionProvider
+}) {
   const interactive = stdin.isTTY && stdout.isTTY && !flags.nonInteractive
   const rl = interactive ? readline.createInterface({ input: stdin, output: stdout }) : null
 
@@ -57,21 +65,27 @@ async function runSetup({ cwd, config, scope, flags = {}, logger = console }) {
       fallback: 'true'
     }), true)
 
-    const attachExisting = toBoolean(await resolveValue({
-      interactive,
-      rl,
-      current: flags.databaseUrl || nextConfig.notion.databaseId ? 'true' : '',
-      flagValue: flags.attachExisting,
-      prompt: 'Attach to an existing Notion database? (`true` or `false`)',
-      fallback: flags.databaseUrl ? 'true' : 'false'
-    }), false)
+    const databaseTargetProvided = flags.databaseUrl || flags.databaseId
+    const pageTargetProvided = flags.parentUrl || flags.parentPageId
+    const attachExisting = databaseTargetProvided
+      ? true
+      : pageTargetProvided
+        ? false
+        : toBoolean(await resolveValue({
+            interactive,
+            rl,
+            current: nextConfig.notion.databaseId ? 'true' : '',
+            flagValue: flags.attachExisting,
+            prompt: 'Attach to an existing Notion database? (`true` or `false`)',
+            fallback: nextConfig.notion.databaseId ? 'true' : 'false'
+          }), false)
 
     if (attachExisting) {
       const databaseValue = await resolveValue({
         interactive,
         rl,
         current: nextConfig.notion.databaseId,
-        flagValue: flags.databaseUrl || flags.databaseId,
+        flagValue: databaseTargetProvided,
         prompt: 'Existing Notion database URL or ID'
       })
       nextConfig.notion.databaseId = extractNotionId(databaseValue)
@@ -98,11 +112,11 @@ async function runSetup({ cwd, config, scope, flags = {}, logger = console }) {
 
     assertRequiredSetupValues(nextConfig)
 
-    const canvasProvider = new CanvasProvider(nextConfig)
-    const notionProvider = new NotionProvider(nextConfig)
-    await canvasProvider.verifyAccess()
-    await notionProvider.verifyAccess()
-    nextConfig.notion.databaseId = await notionProvider.ensureDatabase({
+    const canvas = canvasProvider || new CanvasProvider(nextConfig)
+    const notion = notionProvider || new NotionProvider(nextConfig)
+    await canvas.verifyAccess()
+    await notion.verifyAccess()
+    nextConfig.notion.databaseId = await notion.ensureDatabase({
       databaseId: nextConfig.notion.databaseId,
       parentPageId: nextConfig.notion.parentPageId,
       title: nextConfig.notion.databaseTitle

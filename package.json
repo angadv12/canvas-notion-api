@@ -15,11 +15,12 @@
     "canvas-notion": "./bin/canvas-notion.js"
   },
   "files": [
-    "bin",
-    "docs",
+    "bin/canvas-notion.js",
+    "docs/specs",
+    "LICENSE.txt",
     "main.js",
     "README.md",
-    "src"
+    "src/*.js"
   ],
   "engines": {
     "node": ">=20"

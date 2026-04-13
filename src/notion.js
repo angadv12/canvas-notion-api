@@ -1,6 +1,7 @@
 const { Client, isNotionClientError, APIErrorCode } = require('@notionhq/client')
 const {
   DEFAULT_DATABASE_TITLE,
+  ITEM_TYPE_OPTIONS,
   REQUIRED_DATABASE_PROPERTIES
 } = require('./constants')
 const {
@@ -28,7 +29,7 @@ class NotionProvider {
 
   async ensureDatabase({ databaseId, parentPageId, title = DEFAULT_DATABASE_TITLE }) {
     if (databaseId) {
-      await this.validateDatabaseSchema(databaseId)
+      await this.ensureDatabaseSchema(databaseId)
       return databaseId
     }
 
@@ -52,24 +53,24 @@ class NotionProvider {
     return database.id
   }
 
-  async validateDatabaseSchema(databaseId) {
+  async ensureDatabaseSchema(databaseId) {
     const dataSourceId = await this.resolveDataSourceId(databaseId)
     const dataSource = await this.withRetry(
       () => this.client.dataSources.retrieve({ data_source_id: dataSourceId }),
       'retrieve Notion data source'
     )
+    const schemaUpdates = buildSchemaUpdates(dataSource.properties || {})
 
-    for (const [propertyName, propertyType] of Object.entries(REQUIRED_DATABASE_PROPERTIES)) {
-      const property = dataSource.properties[propertyName]
-      if (!property) {
-        throw new Error(`Notion database is missing property "${propertyName}".`)
-      }
-      if (property.type !== propertyType) {
-        throw new Error(
-          `Notion property "${propertyName}" must be type "${propertyType}", found "${property.type}".`
-        )
-      }
+    if (Object.keys(schemaUpdates).length) {
+      await this.withRetry(() => this.client.dataSources.update({
+        data_source_id: dataSourceId,
+        properties: schemaUpdates
+      }), 'update Notion data source schema')
     }
+  }
+
+  async validateDatabaseSchema(databaseId) {
+    await this.ensureDatabaseSchema(databaseId)
   }
 
   async listPages(databaseId) {
@@ -155,6 +156,10 @@ class NotionProvider {
     this.dataSourceIds.set(databaseId, primaryDataSourceId)
     return primaryDataSourceId
   }
+
+  isStaleStateError(error) {
+    return isStaleNotionStateError(error)
+  }
 }
 
 function buildDatabaseProperties() {
@@ -163,17 +168,68 @@ function buildDatabaseProperties() {
     Course: { rich_text: {} },
     'Course ID': { rich_text: {} },
     'Canvas ID': { rich_text: {} },
-    'Item Type': {
-      select: {
-        options: [{ name: 'assignment' }, { name: 'discussion' }]
-      }
-    },
+    'Item Type': buildItemTypeProperty(),
     URL: { url: {} },
     'Due Date': { date: {} },
     'Canvas Updated At': { date: {} },
     'Source Key': { rich_text: {} },
     'Source Signature': { rich_text: {} },
     Completion: { checkbox: {} }
+  }
+}
+
+function buildSchemaUpdates(existingProperties) {
+  const desiredProperties = buildDatabaseProperties()
+  const updates = {}
+  const titlePropertyName = Object.entries(existingProperties).find(([, property]) => property?.type === 'title')?.[0]
+
+  for (const [propertyName, propertyType] of Object.entries(REQUIRED_DATABASE_PROPERTIES)) {
+    const property = existingProperties[propertyName]
+    if (!property) {
+      if (propertyType === 'title' && titlePropertyName) {
+        throw new Error(
+          `Notion database is missing property "${propertyName}" and already has title property "${titlePropertyName}".`
+        )
+      }
+      updates[propertyName] = desiredProperties[propertyName]
+      continue
+    }
+
+    if (property.type !== propertyType) {
+      throw new Error(
+        `Notion property "${propertyName}" must be type "${propertyType}", found "${property.type}".`
+      )
+    }
+
+    if (propertyName === 'Item Type') {
+      const itemTypeUpdate = buildItemTypeOptionUpdate(property)
+      if (itemTypeUpdate) {
+        updates[propertyName] = itemTypeUpdate
+      }
+    }
+  }
+
+  return updates
+}
+
+function buildItemTypeProperty() {
+  return {
+    select: {
+      options: ITEM_TYPE_OPTIONS.map((name) => ({ name }))
+    }
+  }
+}
+
+function buildItemTypeOptionUpdate(property) {
+  const existingOptions = new Set((property.select?.options || []).map((option) => option.name))
+  const missingOptions = ITEM_TYPE_OPTIONS.filter((name) => !existingOptions.has(name))
+  if (!missingOptions.length) {
+    return null
+  }
+  return {
+    select: {
+      options: missingOptions.map((name) => ({ name }))
+    }
   }
 }
 
@@ -239,4 +295,19 @@ function isRetriableNotionError(error) {
   return Boolean(error.status && error.status >= 500)
 }
 
-module.exports = { NotionProvider, buildDatabaseProperties, toNotionProperties, parseNotionPage }
+function isStaleNotionStateError(error) {
+  if (!error) return false
+  if (isNotionClientError(error)) {
+    return [APIErrorCode.ObjectNotFound, APIErrorCode.ValidationError].includes(error.code)
+  }
+  return /not found|no longer exists|invalid page/i.test(error.message || '')
+}
+
+module.exports = {
+  NotionProvider,
+  buildDatabaseProperties,
+  buildSchemaUpdates,
+  toNotionProperties,
+  parseNotionPage,
+  isStaleNotionStateError
+}

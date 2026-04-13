@@ -1,7 +1,9 @@
 const CONFIG_DIR_NAME = '.canvas-notion'
 const CONFIG_FILE_NAME = 'config.json'
 const STATE_FILE_NAME = 'state.json'
+const STATE_VERSION = 2
 const DEFAULT_DATABASE_TITLE = 'Canvas Assignments'
+const ITEM_TYPE_OPTIONS = ['assignment', 'discussion']
 
 const LINKS = {
   canvasToken: 'https://community.canvaslms.com/t5/Canvas-Basics-Guide/How-do-I-manage-API-access-tokens-in-my-user-account/ta-p/615312',
@@ -51,7 +53,9 @@ module.exports = {
   CONFIG_DIR_NAME,
   CONFIG_FILE_NAME,
   STATE_FILE_NAME,
+  STATE_VERSION,
   DEFAULT_DATABASE_TITLE,
+  ITEM_TYPE_OPTIONS,
   DEFAULT_CONFIG,
   REQUIRED_DATABASE_PROPERTIES,
   LINKS

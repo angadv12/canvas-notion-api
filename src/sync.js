@@ -1,25 +1,23 @@
 const { formatDuration, nowIso, runRateLimitedTasks } = require('./utils')
 
-function createSyncPlan({ items, existingPages, state, inScopeCourseIds }) {
+function createSyncPlan({ items, state, inScopeCourseIds }) {
   const creates = []
   const updates = []
   const restores = []
   const archives = []
 
   const itemMap = new Map(items.map((item) => [item.sourceKey, item]))
-  const pageMap = new Map(existingPages.filter((page) => page.sourceKey).map((page) => [page.sourceKey, page]))
-  const stateItems = state.items || {}
+  const trackedItems = state.items || {}
 
   for (const item of items) {
-    const existingPage = pageMap.get(item.sourceKey)
-    if (existingPage) {
-      if (existingPage.sourceSignature !== item.sourceSignature) {
-        updates.push({ pageId: existingPage.pageId, item })
+    const tracked = trackedItems[item.sourceKey]
+    if (tracked?.pageId && !tracked.archived) {
+      if (tracked.sourceSignature !== item.sourceSignature) {
+        updates.push({ pageId: tracked.pageId, item })
       }
       continue
     }
 
-    const tracked = stateItems[item.sourceKey]
     if (tracked?.pageId && tracked.archived) {
       restores.push({ pageId: tracked.pageId, item })
       continue
@@ -28,15 +26,30 @@ function createSyncPlan({ items, existingPages, state, inScopeCourseIds }) {
     creates.push({ item })
   }
 
-  for (const page of existingPages) {
-    if (!page.sourceKey || !page.courseId) continue
-    if (!inScopeCourseIds.has(page.courseId)) continue
-    if (!itemMap.has(page.sourceKey)) {
-      archives.push({ pageId: page.pageId, sourceKey: page.sourceKey })
+  for (const [sourceKey, tracked] of Object.entries(trackedItems)) {
+    if (!tracked?.pageId || tracked.archived || !tracked.courseId) continue
+    if (!inScopeCourseIds.has(tracked.courseId)) continue
+    if (!itemMap.has(sourceKey)) {
+      archives.push({
+        pageId: tracked.pageId,
+        sourceKey,
+        courseId: tracked.courseId,
+        sourceSignature: tracked.sourceSignature || ''
+      })
     }
   }
 
   return { creates, updates, restores, archives }
+}
+
+function shouldReconcileState({ state, databaseId, forceReconcile = false }) {
+  if (forceReconcile) return true
+  if (!state?.databaseId || state.databaseId !== databaseId) return true
+
+  const trackedItems = Object.values(state.items || {})
+  if (!trackedItems.length) return true
+
+  return trackedItems.some((tracked) => !tracked.pageId || !tracked.courseId)
 }
 
 async function runSync({
@@ -75,15 +88,25 @@ async function runSync({
     title: config.notion.databaseTitle
   })
 
-  const existingReadStart = Date.now()
-  const existingPages = await notionProvider.listPages(databaseId)
-  timings.notionReadMs = Date.now() - existingReadStart
+  const reconciled = shouldReconcileState({
+    state: stateStore.state,
+    databaseId,
+    forceReconcile: Boolean(options.reconcile)
+  })
+
+  if (reconciled) {
+    const existingReadStart = Date.now()
+    const existingPages = await notionProvider.listPages(databaseId)
+    stateStore.replacePages(databaseId, existingPages)
+    timings.notionReadMs = Date.now() - existingReadStart
+  } else {
+    timings.notionReadMs = 0
+  }
 
   const diffStart = Date.now()
   const inScopeCourseIds = new Set(courses.map((course) => course.id))
   const plan = createSyncPlan({
     items,
-    existingPages,
     state: stateStore.state,
     inScopeCourseIds
   })
@@ -97,7 +120,8 @@ async function runSync({
     restores: plan.restores.length,
     archives: plan.archives.length,
     dryRun: Boolean(options.dryRun),
-    databaseId
+    databaseId,
+    reconciled
   }
 
   if (options.dryRun) {
@@ -113,26 +137,37 @@ async function runSync({
   }
 
   const writeStart = Date.now()
-  const writeOptions = {
-    concurrency: config.sync.notionWriteConcurrency,
-    minIntervalMs: config.sync.notionWriteDelayMs
+  try {
+    await applySyncPlan({
+      plan,
+      config,
+      databaseId,
+      notionProvider,
+      stateStore
+    })
+  } catch (error) {
+    if (
+      !reconciled &&
+      !options.retryAfterStaleState &&
+      typeof notionProvider.isStaleStateError === 'function' &&
+      notionProvider.isStaleStateError(error)
+    ) {
+      logger.log('Cached Notion state is stale. Rebuilding from Notion and retrying once.')
+      return runSync({
+        config,
+        canvasProvider,
+        notionProvider,
+        stateStore,
+        logger,
+        options: {
+          ...options,
+          reconcile: true,
+          retryAfterStaleState: true
+        }
+      })
+    }
+    throw error
   }
-  await runRateLimitedTasks(plan.creates, writeOptions, async (entry) => {
-    const page = await notionProvider.createPage(databaseId, entry.item)
-    stateStore.trackPage(entry.item.sourceKey, page.pageId, false)
-  })
-  await runRateLimitedTasks(plan.updates, writeOptions, async (entry) => {
-    const page = await notionProvider.updatePage(entry.pageId, entry.item)
-    stateStore.trackPage(entry.item.sourceKey, page.pageId, false)
-  })
-  await runRateLimitedTasks(plan.restores, writeOptions, async (entry) => {
-    const page = await notionProvider.restorePage(entry.pageId, entry.item)
-    stateStore.trackPage(entry.item.sourceKey, page.pageId, false)
-  })
-  await runRateLimitedTasks(plan.archives, writeOptions, async (entry) => {
-    await notionProvider.archivePage(entry.pageId)
-    stateStore.trackPage(entry.sourceKey, entry.pageId, true)
-  })
   timings.notionWriteMs = Date.now() - writeStart
 
   return finishSync({
@@ -143,6 +178,30 @@ async function runSync({
     startedAt,
     databaseId,
     persistState: true
+  })
+}
+
+async function applySyncPlan({ plan, config, databaseId, notionProvider, stateStore }) {
+  const writeOptions = {
+    concurrency: config.sync.notionWriteConcurrency,
+    minIntervalMs: config.sync.notionWriteDelayMs
+  }
+
+  await runRateLimitedTasks(plan.creates, writeOptions, async (entry) => {
+    const page = await notionProvider.createPage(databaseId, entry.item)
+    stateStore.trackPage(entry.item.sourceKey, page.pageId, false, entry.item)
+  })
+  await runRateLimitedTasks(plan.updates, writeOptions, async (entry) => {
+    const page = await notionProvider.updatePage(entry.pageId, entry.item)
+    stateStore.trackPage(entry.item.sourceKey, page.pageId, false, entry.item)
+  })
+  await runRateLimitedTasks(plan.restores, writeOptions, async (entry) => {
+    const page = await notionProvider.restorePage(entry.pageId, entry.item)
+    stateStore.trackPage(entry.item.sourceKey, page.pageId, false, entry.item)
+  })
+  await runRateLimitedTasks(plan.archives, writeOptions, async (entry) => {
+    await notionProvider.archivePage(entry.pageId)
+    stateStore.trackPage(entry.sourceKey, entry.pageId, true, entry)
   })
 }
 
@@ -171,5 +230,6 @@ function finishSync({ logger, stateStore, summary, timings, startedAt, databaseI
 
 module.exports = {
   createSyncPlan,
+  shouldReconcileState,
   runSync
 }

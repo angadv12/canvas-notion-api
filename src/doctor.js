@@ -1,7 +1,7 @@
 const { CanvasProvider } = require('./canvas')
 const { NotionProvider } = require('./notion')
 
-async function runDoctor({ config, logger = console }) {
+async function runDoctor({ config, logger = console, canvasProvider, notionProvider }) {
   if (!config.canvas.baseUrl) throw new Error('Canvas base URL is not configured.')
   if (!config.canvas.token) throw new Error('Canvas token is not configured.')
   if (!config.notion.token) throw new Error('Notion token is not configured.')
@@ -9,8 +9,8 @@ async function runDoctor({ config, logger = console }) {
     throw new Error('Notion database or parent page is not configured.')
   }
 
-  const canvas = new CanvasProvider(config)
-  const notion = new NotionProvider(config)
+  const canvas = canvasProvider || new CanvasProvider(config)
+  const notion = notionProvider || new NotionProvider(config)
 
   await canvas.verifyAccess()
   logger.log('Canvas access: ok')
